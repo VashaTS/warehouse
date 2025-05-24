@@ -5,11 +5,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import create_engine, or_
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text, distinct
 from models import Base, Item
 from datetime import date
 from PIL import Image
 import shutil
 import os
+import unicodedata
 
 DATABASE_URL = "sqlite:///./warehouse.db"
 UPLOAD_DIR = "./uploads"
@@ -19,6 +21,44 @@ engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base.metadata.create_all(bind=engine)
 
+
+with engine.begin() as conn:
+    conn.exec_driver_sql("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS item_fts
+        USING fts5(
+            name,
+            name_pl,
+            keywords,
+            content='items',          -- table you already have
+            content_rowid='id',       -- PK column in items
+            tokenize = 'unicode61 remove_diacritics 2'
+        )
+    """)
+    conn.exec_driver_sql("""
+        INSERT INTO item_fts(item_fts) VALUES('rebuild')
+    """)
+with engine.begin() as conn:
+    conn.exec_driver_sql("""
+    CREATE TRIGGER IF NOT EXISTS item_ai AFTER INSERT ON items BEGIN
+      INSERT INTO item_fts(rowid, name, name_pl, keywords)
+      VALUES (new.id, new.name, new.name_pl, new.keywords);
+    END;
+    """)
+    conn.exec_driver_sql("""
+    CREATE TRIGGER IF NOT EXISTS item_au AFTER UPDATE ON items BEGIN
+      UPDATE item_fts
+      SET name     = new.name,
+          name_pl  = new.name_pl,
+          keywords = new.keywords
+      WHERE rowid = new.id;
+    END;
+    """)
+    conn.exec_driver_sql("""
+    CREATE TRIGGER IF NOT EXISTS item_ad AFTER DELETE ON items BEGIN
+      DELETE FROM item_fts WHERE rowid = old.id;
+    END;
+    """)
+
 app = FastAPI()
 
 app.add_middleware(
@@ -26,7 +66,7 @@ app.add_middleware(
     allow_origins=[
         "http://127.0.0.1:5173",
         "http://localhost:5173",
-        "http://192.168.1.126:5173"  # ← ADD THIS LINE if you use LAN IP like in your screenshot
+        "http://192.168.1.202:5173"
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -89,16 +129,24 @@ def create_item(item: ItemCreate):
 @app.get("/items/search")
 def search_items(q: str = Query(..., min_length=1)):
     db = SessionLocal()
-    # search in name, name_pl, and keywords
-    items = db.query(Item).filter(
-        or_(
-            Item.name.ilike(f"%{q}%"),
-            Item.name_pl.ilike(f"%{q}%"),
-            Item.keywords.ilike(f"%{q}%")
-        )
-    ).all()
+    
+    # FTS query – we use tokens, so append * for prefix search
+    # e.g. user typed "zar" -> query string "zar*"
+    fts_query = f'{q}*'
+    
+    rows = db.execute(text("""
+        SELECT items.*
+        FROM item_fts
+        JOIN items ON items.id = item_fts.rowid
+        WHERE item_fts MATCH :fts_query
+        ORDER BY rank  -- FTS5’s built-in relevancy
+        LIMIT 50;
+    """), {'fts_query': fts_query}).mappings().all()
+    
     db.close()
-    return items
+    return [dict(r) for r in rows]
+with engine.begin() as c:
+    c.exec_driver_sql("INSERT INTO item_fts(item_fts) VALUES('rebuild');")
 
 @app.put("/items/{item_id}")
 def update_item(item_id: int, updated_item: ItemCreate):
@@ -114,5 +162,29 @@ def update_item(item_id: int, updated_item: ItemCreate):
     db.refresh(db_item)
     db.close()
     return db_item
+@app.get("/rows")
+def list_rows():
+    """Return a sorted list of distinct row numbers present in the DB."""
+    db = SessionLocal()
+    rows = [r[0] for r in db.query(distinct(Item.row)).order_by(Item.row).all()]
+    db.close()
+    return rows
+
+
+@app.get("/items/by_row/{row_num}")
+def items_by_row(row_num: int):
+    """Return all items that belong to the given row (any column/height/depth)."""
+    db = SessionLocal()
+    items = db.query(Item).filter(Item.row == row_num).all()
+    db.close()
+    return items
+# list every item in the table
+@app.get("/items")
+def list_items():
+    db = SessionLocal()
+    items = db.query(Item).all()
+    db.close()
+    return items
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+app.mount("/", StaticFiles(directory="../frontend/dist", html=True), name="frontend")

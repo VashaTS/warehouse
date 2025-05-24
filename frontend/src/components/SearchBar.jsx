@@ -1,19 +1,16 @@
-function SearchBar({ query, setQuery }) {
-    return (
+function SearchBar({ query, setQuery, fetchAll }) {
+  return (
+    <div className="toolbar">
       <input
         type="text"
         placeholder="szukaj..."
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        style={{
-          width: '100%',
-          padding: '0.5rem',
-          fontSize: '1rem',
-          marginBottom: '1rem',
-          boxSizing: 'border-box'
-        }}
+        className="search"
       />
-    );
-  }
-  export default SearchBar;
+      <button onClick={fetchAll}>Pokaż wszystko</button>
+    </div>
+  );
+}
+export default SearchBar;
   

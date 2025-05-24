@@ -1,6 +1,8 @@
 // src/App.jsx
 import { useState, useEffect } from 'react';
 import SearchBar from './components/SearchBar';
+import RowSelector from './components/RowSelector';
+import GridView from './components/GridView';
 import ItemForm from './components/ItemForm';
 import ItemList from './components/ItemList';
 import ImageModal from './components/ImageModal';
@@ -12,15 +14,17 @@ function App() {
 
   const [query, setQuery] = useState('');
   const [items, setItems] = useState([]);
+  const [rows,setRows] = useState([]);
+  const [currentRow,setCurrentRow] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState(null);
   const [file, setFile] = useState(null);
   const [modalImage, setModalImage] = useState(null);
-  const [newItem, setNewItem] = useState({
+  const EMPTY_ITEM = {
     name: '',
     name_pl: '',
     category: '',
-    room: 'main',
+    room: 'main',    
     row: 0,
     column: 0,
     height: 0,
@@ -30,7 +34,24 @@ function App() {
     keywords: '',
     notes: '',
     image_url: ''
-  });
+  };
+  const [newItem, setNewItem] = useState(EMPTY_ITEM);
+
+  const fetchRows = ()=>
+    fetch(`${backendUrl}/rows`).then(r=>r.json()).then(setRows);
+
+  const fetchAll = () => {
+    setCurrentRow(null);             // clear grid view
+    setQuery('');                    // clear search box
+    fetch(`${backendUrl}/items`)
+      .then(r => r.json())
+      .then(setItems);
+  };
+
+  const fetchByRow = (r)=>
+    fetch(`${backendUrl}/items/by_row/${r}`).then(r=>r.json()).then(setItems);
+
+  useEffect(()=>{fetchRows();},[]);
 
   useEffect(() => {
     if (query.length === 0) {
@@ -85,10 +106,7 @@ function App() {
     });
 
     if (response.ok) {
-      setNewItem({
-        name: '', name_pl: '', category: '', room: '', row: 0, column: 0,
-        height: 0, depth: 0, amount: 1, expiry_date: '', keywords: '', notes: '', image_url: ''
-      });
+      setNewItem(EMPTY_ITEM);
       setEditId(null);
       setShowForm(false);
       setQuery('');
@@ -100,11 +118,21 @@ function App() {
   };
 
   return (
-    <div style={{ maxWidth: '1000px', padding: '0 1rem', boxSizing: 'border-box', margin: '2rem auto', fontFamily: 'sans-serif', color: 'white', width: '100%' }}>
+    <div className="container">
       <h1>Szukaj w magazynie</h1>
       {modalImage && <ImageModal src={modalImage} onClose={() => setModalImage(null)} />}
 
-      <SearchBar query={query} setQuery={setQuery} />
+      <SearchBar query={query} setQuery={setQuery} fetchAll={fetchAll} />
+
+      <RowSelector rows={rows} currentRow={currentRow} onSelect={(r)=>{
+        if (r===currentRow) {        // toggle off → back to list view
+          setCurrentRow(null);
+          setItems([]);
+          return;
+        }
+        setCurrentRow(r);
+        fetchByRow(r);
+      }}/>
 
       <button onClick={() => setShowForm(!showForm)} style={{ marginBottom: '1rem' }}>
         {showForm ? (editId ? 'Ukryj edycję' : 'Ukryj dodawanie') : 'Dodaj nową rzecz'}
@@ -119,10 +147,16 @@ function App() {
           handleSubmit={handleSubmit}
           editId={editId}
           setEditId={setEditId}
+          backendUrl={backendUrl}
+          EMPTY_ITEM={EMPTY_ITEM}
         />
       )}
 
-      <ItemList items={items} setEditId={setEditId} setShowForm={setShowForm} setNewItem={setNewItem} setModalImage={setModalImage} backendUrl={backendUrl} />
+      {currentRow!==null ? (
+        <GridView items={items} backendUrl={backendUrl}/>
+      ) : (
+        <ItemList items={items} setEditId={setEditId} setShowForm={setShowForm} setNewItem={setNewItem} setModalImage={setModalImage} backendUrl={backendUrl}/>
+      )}
     </div>
   );
 }

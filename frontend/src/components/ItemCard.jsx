@@ -1,3 +1,5 @@
+import { thumbSrc, fullSrc } from '../utils/img';
+
 function ItemCard({ item, setEditId, setShowForm, setNewItem, setModalImage, backendUrl }) {
     return (
       <li
@@ -28,9 +30,9 @@ function ItemCard({ item, setEditId, setShowForm, setNewItem, setModalImage, bac
           </button>
         </div>
         {item.image_url && (
-          <div style={{ cursor: 'pointer' }} onClick={() => setModalImage(`${backendUrl}/uploads/${item.image_url.split("/").pop()}`)}>
+          <div style={{ cursor: 'pointer' }} onClick={() => setModalImage(fullSrc(backendUrl,item.image_url))}>
             <img
-              src={`${backendUrl}/uploads/thumb_${item.image_url.split("/").pop()}`}
+              src={thumbSrc(backendUrl,item.image_url)}
               alt="thumb"
               style={{ maxWidth: '150px', maxHeight: '150px', borderRadius: '4px' }}
             />
